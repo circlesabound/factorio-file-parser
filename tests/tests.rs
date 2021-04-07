@@ -9,10 +9,7 @@ fn test_deserialise() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = fs::read(path)?;
 
     // attempt to deserialise
-    let mod_settings = ModSettings::try_from_bytes(&bytes)?;
-
-    // output
-    println!("{:?}", mod_settings);
+    ModSettings::try_from_bytes(&bytes)?;
 
     Ok(())
 }

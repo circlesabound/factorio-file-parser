@@ -67,12 +67,17 @@ impl ModSettings {
             }
         }
 
-        Ok(ModSettings {
-            version,
-            startup,
-            runtime_global,
-            runtime_per_user,
-        })
+        // Should be at EOF now
+        if let Err(Error::Eof) = d.peek_u8() {
+            Ok(ModSettings {
+                version,
+                startup,
+                runtime_global,
+                runtime_per_user,
+            })
+        } else {
+            Err(Error::TrailingBytes)
+        }
     }
 }
 
