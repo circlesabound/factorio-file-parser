@@ -13,8 +13,10 @@ pub struct ModSettings {
     pub runtime_per_user: PropertyTree,
 }
 
-impl ModSettings {
-    pub fn try_from_bytes(input: &[u8]) -> Result<Self> {
+impl TryFrom<&[u8]> for ModSettings {
+    type Error = Error;
+
+    fn try_from(input: &[u8]) -> Result<Self> {
         let mut d = Deserialiser { byte_slice: input };
 
         // First is 8 bytes representing game version
@@ -34,7 +36,8 @@ impl ModSettings {
         let runtime_global;
         let runtime_per_user;
         match d.parse_property_tree()? {
-            PropertyTree::Dictionary(mut dict) => {
+            PropertyTree::Dictionary(dict) => {
+                let mut dict: HashMap<String, PropertyTree> = dict.into_iter().collect();
                 match dict.remove("startup") {
                     None => {
                         return Err(Error::Syntax(
@@ -78,6 +81,31 @@ impl ModSettings {
         } else {
             Err(Error::TrailingBytes)
         }
+    }
+}
+
+impl TryInto<Vec<u8>> for ModSettings {
+    type Error = Error;
+
+    fn try_into(self) -> Result<Vec<u8>> {
+        let mut s = Serialiser::new();
+
+        // Write the version first
+        s.write_version(self.version);
+
+        // Next is a bool always set to false
+        s.write_bool(false);
+
+        // Construct our top-level property tree, then write it
+        let mut dict = Vec::with_capacity(3);
+        dict.push(("startup".to_owned(), self.startup));
+        dict.push(("runtime-global".to_owned(), self.runtime_global));
+        dict.push(("runtime-per-user".to_owned(), self.runtime_per_user));
+        let top_level = PropertyTree::Dictionary(dict);
+        s.write_property_tree(top_level)?;
+
+        // Done
+        Ok(s.bytes)
     }
 }
 
@@ -218,7 +246,7 @@ impl<'a> Deserialiser<'a> {
                 let len = self.next_u32()?;
 
                 // Iterate over dict items
-                let mut dict = HashMap::with_capacity(len as usize);
+                let mut dict = Vec::with_capacity(len as usize);
                 for _ in 0..len {
                     // 1 string representing the key
                     let key = self.parse_string()?;
@@ -226,12 +254,160 @@ impl<'a> Deserialiser<'a> {
                     // 1 property tree
                     let value = self.parse_property_tree()?;
 
-                    dict.insert(key, value);
+                    dict.push((key, value));
                 }
 
                 Ok(PropertyTree::Dictionary(dict))
             }
         }
+    }
+}
+
+struct Serialiser {
+    bytes: Vec<u8>,
+}
+
+impl Serialiser {
+    fn new() -> Self {
+        Serialiser { bytes: Vec::new() }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.bytes.push(value)
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.bytes.extend(value.to_le_bytes().iter())
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.bytes.extend(value.to_le_bytes().iter())
+    }
+
+    fn write_bool(&mut self, value: bool) {
+        let byte = match value {
+            true => 1,
+            false => 0,
+        };
+        self.write_u8(byte)
+    }
+
+    fn write_double(&mut self, value: f64) {
+        self.bytes.extend(value.to_le_bytes().iter())
+    }
+
+    fn write_version(&mut self, version: u64) {
+        let main_version = (version >> 48) as u16;
+        self.write_u16(main_version);
+        let major_version = (version >> 32) as u16;
+        self.write_u16(major_version);
+        let minor_version = (version >> 16) as u16;
+        self.write_u16(minor_version);
+        let developer_version = version as u16;
+        self.write_u16(developer_version);
+    }
+
+    fn write_string(&mut self, value: String) {
+        // 1 bool indicating if the string is empty
+        if value.is_empty() {
+            self.write_bool(true);
+        } else {
+            self.write_bool(false);
+
+            // Space-optimised unsigned int representing string length
+            if value.len() < 255 {
+                // If the value < 255 then write the value as a u8
+                self.write_u8(value.len() as u8);
+            } else {
+                // Otherwise write a single byte with value 255, then write our full u32
+                self.write_u8(255);
+                self.write_u32(value.len() as u32); // assuming usize fits into u32
+            }
+
+            // Now write the string encoded as UTF-8
+            self.bytes.extend(value.into_bytes());
+        }
+    }
+
+    fn write_property_tree(&mut self, value: PropertyTree) -> Result<()> {
+        match value {
+            PropertyTree::None => {
+                // 1 byte representing PropertyTreeType
+                self.write_u8(PropertyTreeType::None.try_into()?);
+
+                // 1 bool "not important outside of Factorio internals"
+                self.write_bool(false);
+            }
+            PropertyTree::Bool(bool) => {
+                // 1 byte representing PropertyTreeType
+                self.write_u8(PropertyTreeType::Bool.try_into()?);
+
+                // 1 bool "not important outside of Factorio internals"
+                self.write_bool(false);
+
+                // 1 bool, the actual value
+                self.write_bool(bool);
+            }
+            PropertyTree::Number(double) => {
+                // 1 byte representing PropertyTreeType
+                self.write_u8(PropertyTreeType::Number.try_into()?);
+
+                // 1 bool "not important outside of Factorio internals"
+                self.write_bool(false);
+
+                // 1 double
+                self.write_double(double);
+            }
+            PropertyTree::String(string) => {
+                // 1 byte representing PropertyTreeType
+                self.write_u8(PropertyTreeType::String.try_into()?);
+
+                // 1 bool "not important outside of Factorio internals"
+                self.write_bool(false);
+
+                // 1 string
+                self.write_string(string);
+            }
+            PropertyTree::List(list) => {
+                // 1 byte representing PropertyTreeType
+                self.write_u8(PropertyTreeType::List.try_into()?);
+
+                // 1 bool "not important outside of Factorio internals"
+                self.write_bool(false);
+
+                // 1 u32 representing the number of elements
+                self.write_u32(list.len() as u32);
+
+                // Iterate over list items
+                for item in list {
+                    // 1 string, unused
+                    self.write_string(String::new());
+
+                    // 1 property tree
+                    self.write_property_tree(item)?;
+                }
+            }
+            PropertyTree::Dictionary(dict) => {
+                // 1 byte representing PropertyTreeType
+                self.write_u8(PropertyTreeType::Dictionary.try_into()?);
+
+                // 1 bool "not important outside of Factorio internals"
+                self.write_bool(false);
+                // 1 u32 representing the number of elements
+                self.write_u32(dict.len() as u32);
+
+                // Iterate over dict items
+                for (k, v) in dict {
+                    // 1 string representing the key
+                    self.write_string(k);
+
+                    // 1 property tree
+                    self.write_property_tree(v)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -242,7 +418,7 @@ pub enum PropertyTree {
     Number(f64),
     String(String),
     List(Vec<PropertyTree>),
-    Dictionary(HashMap<String, PropertyTree>),
+    Dictionary(Vec<(String, PropertyTree)>),
 }
 
 enum PropertyTreeType {
