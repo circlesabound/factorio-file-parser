@@ -5,7 +5,7 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ModSettings {
     pub version: u64,
     pub startup: PropertyTree,
