@@ -38,3 +38,18 @@ fn can_deserialise_and_serialise_sample() -> Result<(), Box<dyn std::error::Erro
 
     Ok(())
 }
+
+#[test]
+fn can_serialise_to_json() -> Result<(), Box<dyn std::error::Error>> {
+    // read file
+    let path = Path::new("tests").join("mod-settings.dat");
+    let bytes = fs::read(path)?;
+
+    // attempt to deserialise
+    let ms = ModSettings::try_from(bytes.as_ref())?;
+
+    // serialize to json
+    serde_json::to_string(&ms)?;
+
+    Ok(())
+}

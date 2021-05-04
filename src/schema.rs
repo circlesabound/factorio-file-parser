@@ -5,7 +5,7 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ModSettings {
     pub version: u64,
     pub startup: PropertyTree,
@@ -411,7 +411,7 @@ impl Serialiser {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum PropertyTree {
     None,
     Bool(bool),
