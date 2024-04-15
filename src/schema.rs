@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use std::fmt::{Debug, Display};
 use std::io::Read;
 use std::{
     collections::HashMap,
@@ -7,7 +8,7 @@ use std::{
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ModSettings {
-    pub version: u64,
+    pub version: Version,
     pub startup: PropertyTree,
     pub runtime_global: PropertyTree,
     pub runtime_per_user: PropertyTree,
@@ -73,7 +74,7 @@ impl TryFrom<&[u8]> for ModSettings {
         // Should be at EOF now
         if let Err(Error::Eof) = d.peek_u8() {
             Ok(ModSettings {
-                version,
+                version: version.into(),
                 startup,
                 runtime_global,
                 runtime_per_user,
@@ -91,7 +92,7 @@ impl TryInto<Vec<u8>> for ModSettings {
         let mut s = Serialiser::new();
 
         // Write the version first
-        s.write_version(self.version);
+        s.write_version(u64::from(self.version));
 
         // Next is a bool always set to false
         s.write_bool(false);
@@ -106,6 +107,127 @@ impl TryInto<Vec<u8>> for ModSettings {
 
         // Done
         Ok(s.bytes)
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SaveHeader {
+    pub factorio_version: Version,
+    /// Name of campaign e.g. `freeplay` or `transport-belt-madness`
+    pub campaign: String,
+    /// Name of the campaign level
+    pub name: String,
+    /// Name of the base mod, should always be `base`
+    pub base_mod: String,
+    pub difficulty: u8,
+    // not sure??
+    pub finished: bool,
+    /// Whether the victory condition has been satisfied
+    pub player_won: bool,
+    /// Name of the subsequent campaign level
+    pub next_level: String,
+    /// not sure??
+    pub can_continue: bool,
+    /// If game is finished, but player has chosen to continue??
+    pub finished_but_continuing: bool,
+    /// Whether a replay is being recorded
+    pub saving_replay: bool,
+    /// not sure??
+    pub allow_non_admin_debug_options: bool,
+    /// version of the game this save was loaded from
+    pub loaded_from: Version48,
+    /// build of the game this save was loaded from
+    pub loaded_from_build: u16,
+    /// whether commands are allowed
+    pub allowed_commands: bool,
+    /// list of mods attached to the save
+    pub mods: Vec<SaveHeaderMod>,
+}
+
+impl TryFrom<&[u8]> for SaveHeader {
+    type Error = Error;
+
+    fn try_from(input: &[u8]) -> Result<Self> {
+        let mut d = Deserialiser { byte_slice: input };
+
+        // First is 8 bytes representing game version
+        let factorio_version = d.parse_version()?;
+
+        // Next is a single unused byte
+        let _ = d.parse_bool()?;
+
+        let campaign = d.parse_string_saveheader()?;
+
+        let name = d.parse_string_saveheader()?;
+
+        let base_mod = d.parse_string_saveheader()?;
+
+        // Next is a number representing difficulty
+        let difficulty = d.next_u8()?;
+
+        let finished = d.parse_bool()?;
+
+        let player_won = d.parse_bool()?;
+
+        let next_level = d.parse_string_saveheader()?;
+
+        let can_continue = d.parse_bool()?;
+
+        let finished_but_continuing = d.parse_bool()?;
+
+        let saving_replay = d.parse_bool()?;
+
+        let allow_non_admin_debug_options = d.parse_bool()?;
+
+        let loaded_from = d.parse_version48()?;
+
+        let loaded_from_build = d.next_u16()?;
+
+        let allowed_commands = d.parse_bool()?;
+
+        // Next is the number of mods attached to the save
+        let num_mods = d.next_u32_optim()?;
+        let mut mods = Vec::with_capacity(num_mods as usize);
+        // Iterate and build SaveHeaderMods
+        for _ in 0..num_mods {
+            mods.push(SaveHeaderMod {
+                name: d.parse_string_saveheader()?,
+                version: d.parse_version48()?,
+                crc: d.next_u32()?,
+            });
+        }
+
+        Ok(SaveHeader {
+            factorio_version,
+            campaign,
+            name,
+            base_mod,
+            difficulty,
+            finished,
+            player_won,
+            next_level,
+            can_continue,
+            finished_but_continuing,
+            saving_replay,
+            allow_non_admin_debug_options,
+            loaded_from,
+            loaded_from_build,
+            allowed_commands,
+            mods,
+        })
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SaveHeaderMod {
+    pub name: String,
+    pub version: Version48,
+    pub crc: u32,
+}
+
+impl Display for SaveHeaderMod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.name, self.version)
     }
 }
 
@@ -135,6 +257,15 @@ impl<'a> Deserialiser<'a> {
         Ok(u16::from_le_bytes(*next_slice))
     }
 
+    fn next_u16_optim(&mut self) -> Result<u16> {
+        let byte = self.next_u8()?;
+        if byte != 0xFF {
+            Ok(byte as u16)
+        } else {
+            self.next_u16()
+        }
+    }
+
     fn next_u32(&mut self) -> Result<u32> {
         let next_slice: &[u8; 4] = &self.byte_slice[0..4]
             .try_into()
@@ -143,9 +274,21 @@ impl<'a> Deserialiser<'a> {
         Ok(u32::from_le_bytes(*next_slice))
     }
 
+    fn next_u32_optim(&mut self) -> Result<u32> {
+        // Read 1 preamble byte
+        let so_byte = self.next_u8()?;
+        if so_byte != 0xFF {
+            // If this value < 255, then use it as our value
+            Ok(so_byte as u32)
+        } else {
+            // Otherwise, read the full unsigned int from the next 4 bytes
+            self.next_u32()
+        }
+    }
+
     fn parse_bool(&mut self) -> Result<bool> {
         let b = self.next_u8()?;
-        Ok(b == 1)
+        Ok(b != 0)
     }
 
     fn parse_double(&mut self) -> Result<f64> {
@@ -157,22 +300,19 @@ impl<'a> Deserialiser<'a> {
     }
 
     fn parse_string(&mut self) -> Result<String> {
-        // 1 bool indicating if the string is empty
-        if self.parse_bool()? {
+        self._parse_string(true)
+    }
+
+    fn parse_string_saveheader(&mut self) -> Result<String> {
+        self._parse_string(false)
+    }
+
+    fn _parse_string(&mut self, has_empty_indicator: bool) -> Result<String> {
+        // in mod-settings dat, there is an extra byte indicating if the string is empty?
+        if has_empty_indicator && self.parse_bool()? {
             Ok(String::new())
         } else {
-            // Space-optimised unsigned int representing string length
-            // Read 1 preamble byte
-            let so_byte = self.next_u8()?;
-
-            // If this value < 255, then use it as our value
-            // Otherwise, read the full unsigned int from the next 4 bytes
-            let len: u32;
-            if so_byte < 255 {
-                len = so_byte as u32;
-            } else {
-                len = self.next_u32()?;
-            }
+            let len = self.next_u32_optim()?;
 
             // Read `len` bytes representing UTF-8 string
             let len = len as usize;
@@ -188,17 +328,30 @@ impl<'a> Deserialiser<'a> {
         }
     }
 
-    fn parse_version(&mut self) -> Result<u64> {
-        let main_version = self.next_u16()?;
-        let major_version = self.next_u16()?;
-        let minor_version = self.next_u16()?;
-        let developer_version = self.next_u16()?;
+    fn parse_version(&mut self) -> Result<Version> {
+        let main = self.next_u16()?;
+        let major = self.next_u16()?;
+        let minor = self.next_u16()?;
+        let developer = self.next_u16()?;
 
-        let version = developer_version as u64
-            | (minor_version as u64) << 16
-            | (major_version as u64) << 32
-            | (main_version as u64) << 48;
-        Ok(version)
+        Ok(Version {
+            main,
+            major,
+            minor,
+            developer,
+        })
+    }
+
+    fn parse_version48(&mut self) -> Result<Version48> {
+        let main = self.next_u16_optim()?;
+        let major = self.next_u16_optim()?;
+        let minor = self.next_u16_optim()?;
+
+        Ok(Version48 {
+            main,
+            major,
+            minor,
+        })
     }
 
     fn parse_property_tree(&mut self) -> Result<PropertyTree> {
@@ -458,6 +611,43 @@ impl TryFrom<PropertyTreeType> for u8 {
             PropertyTreeType::List => Ok(4),
             PropertyTreeType::Dictionary => Ok(5),
         }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct Version {
+    main: u16,
+    major: u16,
+    minor: u16,
+    developer: u16,
+}
+
+impl Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}.{}", self.main, self.major, self.minor, self.developer)
+    }
+}
+
+impl From<Version> for u64 {
+    fn from(value: Version) -> Self {
+        let ret = value.developer as u64
+            | (value.minor as u64) << 16
+            | (value.major as u64) << 32
+            | (value.main as u64) << 48;
+        ret
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct Version48 {
+    main: u16,
+    major: u16,
+    minor: u16,
+}
+
+impl Display for Version48 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.main, self.major, self.minor)
     }
 }
 
