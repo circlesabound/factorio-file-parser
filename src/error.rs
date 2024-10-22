@@ -19,8 +19,14 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Message(msg) => write!(f, "{}", msg),
-            _ => unimplemented!(),
+            Error::Message(msg) => write!(f, "factorio-file-parser::Error::Message({})", msg),
+            Error::ByteSlicingError => write!(f, "factorio-file-parser::Error::ByteSlicingError"),
+            Error::Eof => write!(f, "factorio-file-parser::Error::Eof"),
+            Error::OutOfRange => write!(f, "factorio-file-parser::Error::OutOfRange"),
+            Error::Syntax(msg) => write!(f, "factorio-file-parser::Error::Syntax({})", msg),
+            Error::TrailingBytes => write!(f, "factorio-file-parser::Error::TrailingBytes"),
+            Error::Utf8(utf8_error) => write!(f, "factorio-file-parser::Error::Utf8({})", utf8_error),
+            
         }
     }
 }

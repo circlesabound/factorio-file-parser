@@ -185,6 +185,14 @@ impl TryFrom<&[u8]> for SaveHeader {
 
         let allowed_commands = d.parse_bool()?;
 
+        // 2.0 seems to have introduced 6 new bytes here, not sure what they are
+        // Skip them for now
+        if factorio_version.main >= 2 {
+            for _ in 0..6 {
+                d.next_u8()?;
+            }
+        }
+
         // Next is the number of mods attached to the save
         let num_mods = d.next_u32_optim()?;
         let mut mods = Vec::with_capacity(num_mods as usize);
