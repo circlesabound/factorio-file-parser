@@ -1,6 +1,6 @@
 [package]
 name = "factorio-file-parser"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["circlesabound <circlesabound@users.noreply.github.com>"]
 license = "MIT"
 description = "A library for parsing the mod-settings.dat file and level-init.dat file header for Factorio"
