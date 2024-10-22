@@ -137,7 +137,7 @@ pub struct SaveHeader {
     /// version of the game this save was loaded from
     pub loaded_from: Version48,
     /// build of the game this save was loaded from
-    pub loaded_from_build: u16,
+    pub loaded_from_build: BuildNumber,
     /// whether commands are allowed
     pub allowed_commands: bool,
     /// list of mods attached to the save
@@ -181,14 +181,19 @@ impl TryFrom<&[u8]> for SaveHeader {
 
         let loaded_from = d.parse_version48()?;
 
-        let loaded_from_build = d.next_u16()?;
+        let loaded_from_build = match factorio_version.main >= 2 {
+            true => BuildNumber::Build32(d.next_u32()?),
+            false => BuildNumber::Build16(d.next_u16()?),
+        };
 
         let allowed_commands = d.parse_bool()?;
 
-        // 2.0 seems to have introduced 6 new bytes here, not sure what they are
+        // 2.0 seems to have introduced 4 new bytes here, not sure what they are
+        // All test samples seem to have these exact bytes:
+        //   00 00 A0 00
         // Skip them for now
         if factorio_version.main >= 2 {
-            for _ in 0..6 {
+            for _ in 0..4 {
                 d.next_u8()?;
             }
         }
@@ -656,6 +661,22 @@ pub struct Version48 {
 impl Display for Version48 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}.{}", self.main, self.major, self.minor)
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub enum BuildNumber {
+    Build16(u16),
+    Build32(u32),
+}
+
+impl Display for BuildNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let b = match self {
+            BuildNumber::Build16(x) => x.to_string(),
+            BuildNumber::Build32(x) => x.to_string(),
+        };
+        write!(f, "{}", b)
     }
 }
 

@@ -8,7 +8,7 @@ fn can_deserialise_pre_2_0_vanilla() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = fs::read(path)?;
 
     // attempt to deserialise
-    SaveHeader::try_from(bytes.as_ref())?;
+    dbg!(SaveHeader::try_from(bytes.as_ref())?);
 
     Ok(())
 }
@@ -19,7 +19,7 @@ fn can_deserialise_spaceage_vanilla() -> Result<(), Box<dyn std::error::Error>> 
     let bytes = fs::read(path)?;
 
     // attempt to deserialise
-    SaveHeader::try_from(bytes.as_ref())?;
+    dbg!(SaveHeader::try_from(bytes.as_ref())?);
 
     Ok(())
 }
@@ -30,7 +30,7 @@ fn can_deserialise_spaceage_withmods() -> Result<(), Box<dyn std::error::Error>>
     let bytes = fs::read(path)?;
 
     // attempt to deserialise
-    SaveHeader::try_from(bytes.as_ref())?;
+    dbg!(SaveHeader::try_from(bytes.as_ref())?);
 
     Ok(())
 }
